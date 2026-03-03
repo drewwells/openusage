@@ -189,7 +189,9 @@
     })
   }
 
-  function refreshToken(ctx, creds) {
+  function refreshToken(ctx, creds, opts) {
+    const options = opts || {}
+    const allowInvalidGrantFallback = options.allowInvalidGrantFallback === true
     const { oauth, source, fullData } = creds
     if (!oauth.refreshToken) {
       ctx.host.log.warn("refresh skipped: no refresh token")
@@ -217,6 +219,10 @@
         if (body) errorCode = body.error || body.error_description
         ctx.host.log.error("refresh failed: status=" + resp.status + " error=" + String(errorCode))
         if (errorCode === "invalid_grant") {
+          if (allowInvalidGrantFallback) {
+            ctx.host.log.warn("refresh invalid_grant; continuing with existing access token")
+            return null
+          }
           throw "Session expired. Run `claude` to log in again."
         }
         throw "Token expired. Run `claude` to log in again."
@@ -398,7 +404,7 @@
     // Proactively refresh if token is expired or about to expire
     if (needsRefresh(ctx, creds.oauth, nowMs)) {
       ctx.host.log.info("token needs refresh (expired or expiring soon)")
-      const refreshed = refreshToken(ctx, creds)
+      const refreshed = refreshToken(ctx, creds, { allowInvalidGrantFallback: true })
       if (refreshed) {
         accessToken = refreshed
       } else {

@@ -424,7 +424,7 @@ describe("claude plugin", () => {
     expect(result.lines.find((line) => line.label === "Session")).toBeTruthy()
   })
 
-  it("throws session expired when refresh returns invalid_grant", async () => {
+  it("continues with existing token when proactive refresh returns invalid_grant", async () => {
     const ctx = makeCtx()
     ctx.host.fs.exists = () => true
     ctx.host.fs.readText = () =>
@@ -437,6 +437,41 @@ describe("claude plugin", () => {
       })
 
     ctx.host.http.request.mockImplementation((opts) => {
+      if (String(opts.url).includes("/v1/oauth/token")) {
+        return { status: 400, bodyText: JSON.stringify({ error: "invalid_grant" }) }
+      }
+      return {
+        status: 200,
+        bodyText: JSON.stringify({
+          five_hour: { utilization: 10, resets_at: "2099-01-01T00:00:00.000Z" },
+        }),
+      }
+    })
+
+    const plugin = await loadPlugin()
+    const result = plugin.probe(ctx)
+    expect(result.lines.find((line) => line.label === "Session")).toBeTruthy()
+  })
+
+  it("throws session expired when auth retry refresh returns invalid_grant", async () => {
+    const ctx = makeCtx()
+    ctx.host.fs.exists = () => true
+    ctx.host.fs.readText = () =>
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: "token",
+          refreshToken: "refresh",
+          expiresAt: Date.now() + 60_000,
+        },
+      })
+
+    let usageCalls = 0
+    ctx.host.http.request.mockImplementation((opts) => {
+      if (String(opts.url).includes("/api/oauth/usage")) {
+        usageCalls += 1
+        if (usageCalls === 1) return { status: 401, bodyText: "" }
+        return { status: 200, bodyText: "{}" }
+      }
       if (String(opts.url).includes("/v1/oauth/token")) {
         return { status: 400, bodyText: JSON.stringify({ error: "invalid_grant" }) }
       }
